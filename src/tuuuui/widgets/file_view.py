@@ -17,9 +17,10 @@ from pathlib import Path
 
 from textual.app import ComposeResult
 from textual.containers import Container
-from textual.document._document import Selection
-from textual.widgets import ContentSwitcher, Markdown, TextArea
+from textual.widgets import ContentSwitcher, Markdown
 from textual.widgets.text_area import LanguageDoesNotExist
+
+from .emacs import EmacsTextArea
 
 # Map file extensions to tree-sitter language names bundled with Textual.
 _EXT_LANG = {
@@ -65,8 +66,8 @@ def _read_text(path: Path) -> tuple[str, bool]:
     return (data.decode("utf-8", "replace"), False)
 
 
-class Editor(TextArea):
-    """Syntax-highlighting text editor. Emacs keys are added in Phase 3."""
+class Editor(EmacsTextArea):
+    """Syntax-highlighting text editor with emacs keybindings."""
 
     def load(self, path: Path, text: str, *, read_only: bool) -> None:
         self.read_only = read_only
@@ -81,10 +82,6 @@ class Editor(TextArea):
     def is_markdown(self) -> bool:
         return self.language == "markdown"
 
-    # Selection is needed by emacs kill/yank later; expose a clean reset.
-    def reset_selection(self) -> None:
-        self.selection = Selection.cursor(self.cursor_location)
-
 
 class FileView(Container):
     """Switches between a raw editor and a rendered markdown view."""
@@ -95,14 +92,14 @@ class FileView(Container):
     FileView Markdown { height: 1fr; padding: 0 1; }
     """
 
-    def __init__(self, *, read_only: bool = True, **kwargs) -> None:
+    def __init__(self, *, read_only: bool = False, **kwargs) -> None:
         super().__init__(**kwargs)
-        self._read_only = read_only
+        self._force_read_only = read_only
         self._path: Path | None = None
 
     def compose(self) -> ComposeResult:
         with ContentSwitcher(initial="editor"):
-            yield Editor(id="editor", read_only=self._read_only, show_line_numbers=True)
+            yield Editor(id="editor", show_line_numbers=True)
             yield Markdown(id="rendered")
 
     @property
@@ -114,11 +111,25 @@ class FileView(Container):
         return self._path
 
     def open_path(self, path: Path) -> None:
-        """Load *path* into the editor (raw view)."""
+        """Load *path* into the editor (raw view). Binary/unreadable -> read-only."""
         self._path = path
-        text, _is_error = _read_text(path)
-        self.editor.load(path, text, read_only=self._read_only)
+        text, is_error = _read_text(path)
+        read_only = self._force_read_only or is_error
+        self.editor.load(path, text, read_only=read_only)
         self.query_one(ContentSwitcher).current = "editor"
+
+    @property
+    def read_only(self) -> bool:
+        return self.editor.read_only
+
+    def save(self) -> Path:
+        """Write the editor contents back to the file. Returns the path."""
+        if self._path is None:
+            raise RuntimeError("no file open")
+        if self.editor.read_only:
+            raise RuntimeError("buffer is read-only")
+        self._path.write_text(self.editor.text, encoding="utf-8")
+        return self._path
 
     def can_toggle_markdown(self) -> bool:
         return self._path is not None and self.editor.is_markdown

@@ -24,7 +24,7 @@ class Center(ContentSwitcher):
 
     def compose(self) -> ComposeResult:
         yield GitView(self._repo, id="git-view")
-        yield FileView(id="file-view", read_only=True)
+        yield FileView(id="file-view")
 
     @property
     def file_view(self) -> FileView:

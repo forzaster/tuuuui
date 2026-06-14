@@ -28,9 +28,6 @@ from .widgets.center import Center
 from .widgets.filer import Filer
 from .widgets.workspace import Workspace
 
-# Second keys understood after the C-x prefix.
-_CX_CHORDS = {"b", "g", "o", "ctrl+s", "ctrl+c"}
-
 
 class TuuuuiApp(App):
     """A 3-pane terminal IDE."""
@@ -49,6 +46,7 @@ class TuuuuiApp(App):
         self.root = Path(root or Path.cwd()).resolve()
         self.buffers = BufferManager()
         self._cx_pending = False
+        self._cx_timer = None
 
     # ----------------------------------------------------------------- layout
     def compose(self) -> ComposeResult:
@@ -72,9 +70,17 @@ class TuuuuiApp(App):
         self.center.show_file(path)
 
     # ------------------------------------------------------- C-x prefix chords
+    @property
+    def cx_pending(self) -> bool:
+        return self._cx_pending
+
     def action_cx_prefix(self) -> None:
         """Enter pending C-x state; the next key completes the chord."""
         self._set_pending(True)
+        # Auto-cancel the prefix if no second key arrives.
+        if self._cx_timer is not None:
+            self._cx_timer.stop()
+        self._cx_timer = self.set_timer(3.0, lambda: self._set_pending(False))
 
     def _set_pending(self, pending: bool) -> None:
         self._cx_pending = pending
@@ -84,19 +90,20 @@ class TuuuuiApp(App):
             hint.update("C-x  (b: buffers  g: git  o: focus  C-s: save  C-c: quit)")
 
     def on_key(self, event) -> None:
-        """Complete a C-x chord when a prefix is pending."""
-        if not self._cx_pending:
+        """Complete a C-x chord for keys that bubble up (filer / git log focus)."""
+        if not self._cx_pending or event.key == "ctrl+x":
             return
-        key = event.key
-        if key == "ctrl+x":
-            # C-x C-x — keep pending, ignore.
-            return
+        event.stop()
+        event.prevent_default()
+        self.complete_cx(event.key)
+
+    def complete_cx(self, key: str) -> None:
+        """Run the chord for *key* and leave pending state. Called by panes too."""
         self._set_pending(False)
-        if key in _CX_CHORDS:
-            event.stop()
-            event.prevent_default()
-            self._run_chord(key)
-        # Any other key simply cancels the prefix (already cleared above).
+        if self._cx_timer is not None:
+            self._cx_timer.stop()
+            self._cx_timer = None
+        self._run_chord(key)
 
     def _run_chord(self, key: str) -> None:
         if key == "b":
@@ -109,6 +116,7 @@ class TuuuuiApp(App):
             self.action_save()
         elif key == "ctrl+c":
             self.action_quit()
+        # Unknown second key: prefix simply cancelled (no-op).
 
     # ------------------------------------------------------------- chord actions
     def action_buffer_list(self) -> None:
@@ -147,8 +155,16 @@ class TuuuuiApp(App):
         return None
 
     def action_save(self) -> None:
-        # Editing/saving lands in Phase 3.
-        self.notify("Save (C-x C-s) arrives in Phase 3.", severity="information")
+        if not self.center.showing_file:
+            self.notify("No file to save.", severity="warning")
+            return
+        fv = self.center.file_view
+        try:
+            path = fv.save()
+        except RuntimeError as exc:
+            self.notify(str(exc), severity="warning")
+            return
+        self.notify(f"Saved {path.name}")
 
     def action_toggle_markdown(self) -> None:
         if not self.center.showing_file:
