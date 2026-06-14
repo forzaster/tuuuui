@@ -1,13 +1,16 @@
-"""Center pane (git mode): commit log over a diff.
+"""Center pane (git mode): a source list over a diff.
 
-Top:  one line per commit (`git log`), scrollable, selectable. The log
+Top: a selectable list whose first two rows are the working-tree **Unstaged** and
+**Staged** changes, followed by one line per commit (`git log`). The commit part
 **auto-refreshes** on an interval so new commits appear without interaction; the
-highlighted commit and scroll position are preserved across refreshes.
+highlighted row and scroll position are preserved across refreshes.
 
-Bottom: a diff. Defaults to the unstaged working-tree diff; highlighting a commit
-in the log swaps to that commit's diff. The diff does **not** auto-poll — press
-the reload button or ``C-r`` to re-fetch the currently shown diff (handy for the
-unstaged diff while you edit files).
+Bottom: the diff for the highlighted row — unstaged diff, staged diff, or the
+selected commit's diff. The diff does **not** auto-poll — press the reload button
+or ``C-r`` to re-fetch the currently shown diff (handy while you edit files).
+
+Whatever diff is shown also drives the filer: its files are marked / filtered via
+the :class:`GitView.FilesChanged` message.
 """
 
 from __future__ import annotations
@@ -26,6 +29,10 @@ from ..core import git
 
 # How often to poll `git log` for new commits.
 LOG_REFRESH_SECONDS = 5.0
+
+# Synthetic row ids for the working-tree entries at the top of the list.
+UNSTAGED_ID = "__unstaged__"
+STAGED_ID = "__staged__"
 
 
 def _colorize_diff(diff: str) -> Text:
@@ -81,8 +88,9 @@ class GitView(Vertical):
         self._repo = repo
         self._root: Path | None = None  # repository root (for absolute paths)
         self._commits: list[git.Commit] = []
-        # The diff currently shown: a commit sha, or None for the unstaged diff.
-        self._current_sha: str | None = None
+        # Id of the row whose diff is currently shown: UNSTAGED_ID, STAGED_ID,
+        # or a commit sha. Used to re-fetch on reload.
+        self._current_id: str = UNSTAGED_ID
         # Suppress the highlight->diff reaction during programmatic log refresh.
         self._suppress_highlight = False
         # Plain text of the diff currently shown (for inspection/tests).
@@ -136,12 +144,22 @@ class GitView(Vertical):
             self._set_diff(Text(f"git error: {exc}", style="red"))
             return
         self._populate_log(self._commits)
+        log_widget.highlighted = 0  # default to the Unstaged row
         await self._show_unstaged()
 
     def _populate_log(self, commits: list[git.Commit]) -> None:
         log_widget = self.query_one("#log", OptionList)
         log_widget.clear_options()
-        log_widget.add_options([Option(c.one_line(), id=c.sha) for c in commits])
+        options = [
+            Option(Text("● Unstaged changes", style="yellow"), id=UNSTAGED_ID),
+            Option(Text("● Staged changes", style="green"), id=STAGED_ID),
+            *(Option(c.one_line(), id=c.sha) for c in commits),
+        ]
+        log_widget.add_options(options)
+
+    def _option_ids(self) -> list[str]:
+        """All row ids in display order (synthetic rows first, then commits)."""
+        return [UNSTAGED_ID, STAGED_ID, *(c.sha for c in self._commits)]
 
     # ------------------------------------------------------ periodic log refresh
     def _refresh_log(self) -> None:
@@ -158,33 +176,31 @@ class GitView(Vertical):
             return  # nothing changed
         self._commits = commits
         log_widget = self.query_one("#log", OptionList)
-        # Remember which commit was highlighted so we can restore it.
-        kept_sha: str | None = None
+        # Remember which row was highlighted (commit sha or synthetic id).
+        kept_id: str | None = None
         if log_widget.highlighted is not None:
             try:
-                kept_sha = log_widget.get_option_at_index(
-                    log_widget.highlighted
-                ).id
+                kept_id = log_widget.get_option_at_index(log_widget.highlighted).id
             except Exception:
-                kept_sha = None
+                kept_id = None
         # Repopulate without letting the highlight change reload the diff.
         self._suppress_highlight = True
         try:
             self._populate_log(commits)
-            if kept_sha is not None:
-                for i, c in enumerate(commits):
-                    if c.sha == kept_sha:
-                        log_widget.highlighted = i
-                        break
+            ids = self._option_ids()
+            if kept_id in ids:
+                log_widget.highlighted = ids.index(kept_id)
         finally:
             self._suppress_highlight = False
 
     # --------------------------------------------------------------- diff loaders
-    async def _show_unstaged(self) -> None:
-        self._current_sha = None
-        self.query_one("#diff-title", Static).update("Unstaged diff")
+    async def _show_worktree(self, *, staged: bool) -> None:
+        self._current_id = STAGED_ID if staged else UNSTAGED_ID
+        title = "Staged diff" if staged else "Unstaged diff"
+        self.query_one("#diff-title", Static).update(title)
+        fetch = git.diff_staged if staged else git.diff_unstaged
         try:
-            diff = await git.diff_unstaged(self._repo)
+            diff = await fetch(self._repo)
         except git.GitError as exc:
             self._set_diff(Text(f"git error: {exc}", style="red"))
             self._emit_changed("")
@@ -192,11 +208,18 @@ class GitView(Vertical):
         if diff.strip():
             self._set_diff(_colorize_diff(diff))
         else:
-            self._set_diff(Text("No unstaged changes.", style="dim"))
+            empty = "No staged changes." if staged else "No unstaged changes."
+            self._set_diff(Text(empty, style="dim"))
         self._emit_changed(diff)
 
+    async def _show_unstaged(self) -> None:
+        await self._show_worktree(staged=False)
+
+    async def _show_staged(self) -> None:
+        await self._show_worktree(staged=True)
+
     async def _show_commit(self, sha: str) -> None:
-        self._current_sha = sha
+        self._current_id = sha
         self.query_one("#diff-title", Static).update(f"Commit {sha[:9]}")
         try:
             diff = await git.show(self._repo, sha)
@@ -208,25 +231,28 @@ class GitView(Vertical):
         self._emit_changed(diff)
 
     # -------------------------------------------------------------------- events
+    def _select(self, option_id: str | None) -> None:
+        """Show the diff for the row *option_id* (synthetic id or commit sha)."""
+        if option_id == UNSTAGED_ID:
+            coro = self._show_unstaged()
+        elif option_id == STAGED_ID:
+            coro = self._show_staged()
+        elif option_id:
+            coro = self._show_commit(option_id)
+        else:
+            return
+        self.run_worker(coro, group="git-diff", exclusive=True)
+
     def on_option_list_option_highlighted(
         self, event: OptionList.OptionHighlighted
     ) -> None:
         if event.option_list.id != "log" or self._suppress_highlight:
             return
-        sha = event.option.id
-        if sha:
-            self.run_worker(self._show_commit(sha), group="git-diff", exclusive=True)
+        self._select(event.option.id)
 
     def action_reload_diff(self) -> None:
-        """Re-fetch the diff currently shown (unstaged or the selected commit)."""
-        if self._current_sha is None:
-            self.run_worker(self._show_unstaged(), group="git-diff", exclusive=True)
-        else:
-            self.run_worker(
-                self._show_commit(self._current_sha),
-                group="git-diff",
-                exclusive=True,
-            )
+        """Re-fetch the diff currently shown (unstaged / staged / commit)."""
+        self._select(self._current_id)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "reload-diff":

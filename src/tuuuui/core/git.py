@@ -96,6 +96,11 @@ async def diff_unstaged(cwd: Path) -> str:
     return await _run_git(cwd, "diff")
 
 
+async def diff_staged(cwd: Path) -> str:
+    """Index diff (staged changes, ``git diff --cached``). May be empty."""
+    return await _run_git(cwd, "diff", "--cached")
+
+
 async def show(cwd: Path, sha: str) -> str:
     """Diff introduced by commit *sha*."""
     return await _run_git(cwd, "show", "--patch", "--stat", sha)
