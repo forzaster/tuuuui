@@ -15,6 +15,7 @@ dev = ["textual-dev>=1.5", "pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [project.scripts]
 tuuuui = "tuuuui.__main__:main"
+tuuuui-tmux = "tuuuui.launcher:main"
 
 [build-system]
 requires = ["hatchling"]
