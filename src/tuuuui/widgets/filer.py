@@ -9,12 +9,27 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from textual.binding import Binding
 from textual.message import Message
 from textual.widgets import DirectoryTree
 
 
 class Filer(DirectoryTree):
-    """File-system tree for the left pane."""
+    """File-system tree for the left pane.
+
+    Adds emacs-style navigation on top of the default arrow keys:
+    ``C-n``/``C-p`` move down/up, ``C-f``/``C-b`` expand/collapse (descend to
+    child / ascend to parent), and ``C-v``/``M-v`` page down/up.
+    """
+
+    BINDINGS = [
+        Binding("ctrl+n", "cursor_down", "Down", show=False),
+        Binding("ctrl+p", "cursor_up", "Up", show=False),
+        Binding("ctrl+f", "cursor_next_sibling", "Next", show=False),
+        Binding("ctrl+b", "cursor_parent", "Parent", show=False),
+        Binding("ctrl+v", "page_down", "Page down", show=False),
+        Binding("alt+v", "page_up", "Page up", show=False),
+    ]
 
     class FileOpened(Message):
         """Posted when the user selects a file in the tree."""

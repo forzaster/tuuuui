@@ -5,11 +5,12 @@ description = "A 3-pane terminal IDE: file tree + emacs editor / git view + work
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "textual>=8.0",
+    # The [syntax] extra pulls in tree-sitter + language grammars, which are
+    # required for the editor's syntax highlighting to actually render.
+    "textual[syntax]>=8.0",
 ]
 
 [project.optional-dependencies]
-syntax = ["textual[syntax]>=8.0"]
 dev = ["textual-dev>=1.5", "pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [project.scripts]

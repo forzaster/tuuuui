@@ -35,6 +35,8 @@ class TuuuuiApp(App):
 
     CSS_PATH = "app.tcss"
     TITLE = "tuuuui"
+    # Free up C-p for emacs (cursor up); the command palette moves to C-\.
+    COMMAND_PALETTE_BINDING = "ctrl+backslash"
 
     BINDINGS = [
         Binding("ctrl+x", "cx_prefix", "C-x …", priority=True, show=True),
@@ -83,6 +85,8 @@ class TuuuuiApp(App):
     def _open_file(self, path: Path) -> None:
         self.buffers.open(path)
         self.center.show_file(path)
+        # Move focus to the editor so emacs keys act on the file immediately.
+        self.center.file_view.editor.focus()
 
     # ------------------------------------------------------- C-x prefix chords
     @property
