@@ -68,6 +68,8 @@ def main() -> None:
     root = Path(args.path).expanduser().resolve()
     if not root.is_dir():
         parser.error(f"not a directory: {root}")
+    if not 1 <= args.percent <= 99:
+        parser.error("--percent must be between 1 and 99")
     if not tmux.tmux_available():
         parser.error("tmux is not installed or not on PATH.")
 
@@ -80,10 +82,25 @@ def main() -> None:
         )
         return  # not reached
 
-    for argv in tmux_setup_argv(
-        args.session, _app_command(root), args.workspace, args.percent
-    ):
-        subprocess.run(argv, check=True)
+    if tmux.session_exists(args.session):
+        parser.error(
+            f"tmux session '{args.session}' already exists; "
+            f"attach with 'tmux attach -t {args.session}' or pass --session NAME"
+        )
+
+    try:
+        for argv in tmux_setup_argv(
+            args.session, _app_command(root), args.workspace, args.percent
+        ):
+            subprocess.run(argv, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        # Roll back a half-created session so we don't leave it detached.
+        subprocess.run(
+            ["tmux", "kill-session", "-t", args.session],
+            capture_output=True,
+        )
+        parser.error(exc.stderr.strip() or "tmux setup failed")
+
     # Attach in the foreground (blocks until the session ends).
     os.execvp("tmux", ["tmux", "attach-session", "-t", args.session])
 

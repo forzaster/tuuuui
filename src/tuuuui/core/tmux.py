@@ -26,6 +26,18 @@ def tmux_available() -> bool:
     return shutil.which("tmux") is not None
 
 
+def session_exists(name: str) -> bool:
+    """True if a tmux session named *name* already exists."""
+    if not tmux_available():
+        return False
+    return (
+        subprocess.run(
+            ["tmux", "has-session", "-t", name], capture_output=True
+        ).returncode
+        == 0
+    )
+
+
 def split_right_argv(command: str, percent: int = 30, focus: bool = False) -> list[str]:
     """Build the ``tmux split-window`` argv that opens *command* to the right.
 

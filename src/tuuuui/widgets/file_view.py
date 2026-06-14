@@ -13,6 +13,8 @@ editor is read-only.
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 from textual.app import ComposeResult
@@ -96,6 +98,8 @@ class FileView(Container):
         super().__init__(**kwargs)
         self._force_read_only = read_only
         self._path: Path | None = None
+        # Text as last loaded or saved; used to detect unsaved edits.
+        self._clean_text: str = ""
 
     def compose(self) -> ComposeResult:
         with ContentSwitcher(initial="editor"):
@@ -116,20 +120,54 @@ class FileView(Container):
         text, is_error = _read_text(path)
         read_only = self._force_read_only or is_error
         self.editor.load(path, text, read_only=read_only)
+        # Snapshot what the editor actually holds (post any normalization).
+        self._clean_text = self.editor.text
         self.query_one(ContentSwitcher).current = "editor"
 
     @property
     def read_only(self) -> bool:
         return self.editor.read_only
 
+    @property
+    def is_modified(self) -> bool:
+        """True if the buffer is editable and differs from the saved file."""
+        if self._path is None or self.editor.read_only:
+            return False
+        return self.editor.text != self._clean_text
+
     def save(self) -> Path:
-        """Write the editor contents back to the file. Returns the path."""
+        """Write the editor contents back to the file atomically. Returns the path."""
         if self._path is None:
             raise RuntimeError("no file open")
         if self.editor.read_only:
             raise RuntimeError("buffer is read-only")
-        self._path.write_text(self.editor.text, encoding="utf-8")
+        text = self.editor.text
+        self._atomic_write(self._path, text)
+        self._clean_text = text
         return self._path
+
+    @staticmethod
+    def _atomic_write(path: Path, text: str) -> None:
+        """Write *text* to *path* via a temp file + os.replace (crash-safe).
+
+        Preserves the original file's permission bits when it already exists.
+        """
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.",
+                                   suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(text)
+            try:
+                os.chmod(tmp, os.stat(path).st_mode)  # keep original perms
+            except OSError:
+                pass
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
 
     def can_toggle_markdown(self) -> bool:
         return self._path is not None and self.editor.is_markdown

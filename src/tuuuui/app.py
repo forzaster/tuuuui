@@ -27,6 +27,7 @@ from .core import tmux
 from .core.buffers import BufferManager
 from .widgets.buffer_list import BufferList
 from .widgets.center import Center
+from .widgets.confirm import ConfirmScreen
 from .widgets.filer import Filer, FilerPanel
 from .widgets.git_view import GitView
 
@@ -194,9 +195,25 @@ class TuuuuiApp(App):
         self.notify(message, severity="information" if ok else "warning")
 
     def action_close_file(self) -> None:
-        """Close the current file view and return to the git view (C-x C-c)."""
+        """Close the current file view and return to the git view (C-x C-c).
+
+        If the buffer has unsaved edits, confirm before discarding them.
+        """
         if not self.center.showing_file:
             return
+        if self.center.file_view.is_modified:
+            def _confirmed(discard: bool) -> None:
+                if discard:
+                    self._close_current_file()
+
+            self.push_screen(
+                ConfirmScreen("Unsaved changes — discard and close? (y/n)"),
+                _confirmed,
+            )
+            return
+        self._close_current_file()
+
+    def _close_current_file(self) -> None:
         path = self.center.file_view.path
         if path is not None:
             self.buffers.close(path)
