@@ -22,6 +22,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer, Header, Static
 
+from .core import tmux
 from .core.buffers import BufferManager
 from .widgets.buffer_list import BufferList
 from .widgets.center import Center
@@ -41,9 +42,17 @@ class TuuuuiApp(App):
         Binding("ctrl+q", "quit", "Quit", show=True),
     ]
 
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(
+        self,
+        root: Path | None = None,
+        *,
+        workspace_cmd: str | None = None,
+        tmux_mode: bool = False,
+    ) -> None:
         super().__init__()
         self.root = Path(root or Path.cwd()).resolve()
+        self.workspace_cmd = workspace_cmd or tmux.DEFAULT_WORKSPACE_CMD
+        self.tmux_mode = tmux_mode
         self.buffers = BufferManager()
         self._cx_pending = False
         self._cx_timer = None
@@ -53,9 +62,15 @@ class TuuuuiApp(App):
         yield Header()
         yield Filer(str(self.root), id="filer")
         yield Center(self.root, id="center")
-        yield Workspace(id="workspace")
+        workspace = Workspace(id="workspace")
+        workspace.command = self.workspace_cmd
+        yield workspace
         yield Static("", id="prefix-hint")
         yield Footer()
+
+    def on_mount(self) -> None:
+        if self.tmux_mode:
+            self.action_spawn_workspace()
 
     @property
     def center(self) -> Center:
@@ -87,7 +102,10 @@ class TuuuuiApp(App):
         hint = self.query_one("#prefix-hint", Static)
         hint.set_class(pending, "active")
         if pending:
-            hint.update("C-x  (b: buffers  g: git  o: focus  C-s: save  C-c: quit)")
+            hint.update(
+                "C-x  (b: buffers  g: git  o: focus  t: workspace  "
+                "C-s: save  C-c: quit)"
+            )
 
     def on_key(self, event) -> None:
         """Complete a C-x chord for keys that bubble up (filer / git log focus)."""
@@ -112,6 +130,8 @@ class TuuuuiApp(App):
             self.center.show_git()
         elif key == "o":
             self.action_cycle_focus()
+        elif key == "t":
+            self.action_spawn_workspace()
         elif key == "ctrl+s":
             self.action_save()
         elif key == "ctrl+c":
@@ -153,6 +173,16 @@ class TuuuuiApp(App):
             if child.focusable:
                 return child
         return None
+
+    def action_spawn_workspace(self) -> None:
+        """Split a tmux pane to the right running the workspace CLI."""
+        ok, message = tmux.spawn_workspace(self.workspace_cmd)
+        workspace = self.query_one("#workspace", Workspace)
+        if ok:
+            workspace.running = True
+            self.notify(message)
+        else:
+            self.notify(message, severity="warning")
 
     def action_save(self) -> None:
         if not self.center.showing_file:
