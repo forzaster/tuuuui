@@ -1,6 +1,7 @@
 """TuuuuiApp — the 3-pane terminal IDE.
 
-Layout: [ Filer | Center (git view / file view) | Workspace ].
+Layout: [ Filer | Center (git view / file view) ]. The right-hand workspace is a
+real tmux pane (see ``C-x t`` / ``--tmux``), not an in-app widget.
 
 Emacs-style ``C-x`` is a *prefix*: press ``C-x`` then a second key. The app
 tracks a pending-prefix state and interprets the next key as a chord:
@@ -27,7 +28,6 @@ from .core.buffers import BufferManager
 from .widgets.buffer_list import BufferList
 from .widgets.center import Center
 from .widgets.filer import Filer
-from .widgets.workspace import Workspace
 
 
 class TuuuuiApp(App):
@@ -61,12 +61,11 @@ class TuuuuiApp(App):
 
     # ----------------------------------------------------------------- layout
     def compose(self) -> ComposeResult:
+        # Two panes only: the right-hand workspace is a real tmux pane, not an
+        # in-app widget (see action_spawn_workspace / --tmux).
         yield Header()
         yield Filer(str(self.root), id="filer")
         yield Center(self.root, id="center")
-        workspace = Workspace(id="workspace")
-        workspace.command = self.workspace_cmd
-        yield workspace
         yield Static("", id="prefix-hint")
         yield Footer()
 
@@ -108,7 +107,7 @@ class TuuuuiApp(App):
         if pending:
             hint.update(
                 "C-x  (b: buffers  g: git  o: focus  t: workspace  "
-                "C-s: save  C-c: quit)"
+                "C-s: save  C-c: close file)"
             )
 
     def on_key(self, event) -> None:
@@ -139,7 +138,7 @@ class TuuuuiApp(App):
         elif key == "ctrl+s":
             self.action_save()
         elif key == "ctrl+c":
-            self.action_quit()
+            self.action_close_file()
         # Unknown second key: prefix simply cancelled (no-op).
 
     # ------------------------------------------------------------- chord actions
@@ -155,7 +154,7 @@ class TuuuuiApp(App):
         self.push_screen(BufferList(self.buffers), _picked)
 
     def action_cycle_focus(self) -> None:
-        order = ["filer", "center", "workspace"]
+        order = ["filer", "center"]
         focused = self.focused
         start = 0
         if focused is not None:
@@ -181,12 +180,17 @@ class TuuuuiApp(App):
     def action_spawn_workspace(self) -> None:
         """Split a tmux pane to the right running the workspace CLI."""
         ok, message = tmux.spawn_workspace(self.workspace_cmd)
-        workspace = self.query_one("#workspace", Workspace)
-        if ok:
-            workspace.running = True
-            self.notify(message)
-        else:
-            self.notify(message, severity="warning")
+        self.notify(message, severity="information" if ok else "warning")
+
+    def action_close_file(self) -> None:
+        """Close the current file view and return to the git view (C-x C-c)."""
+        if not self.center.showing_file:
+            return
+        path = self.center.file_view.path
+        if path is not None:
+            self.buffers.close(path)
+        self.center.show_git()
+        self.center.git_view.query_one("#log").focus()
 
     def action_save(self) -> None:
         if not self.center.showing_file:

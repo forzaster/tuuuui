@@ -28,10 +28,9 @@ def test_is_inside_tmux(monkeypatch):
 
 
 async def test_cx_t_spawns_workspace(tmp_path, monkeypatch):
-    """C-x t calls the spawn helper and marks the workspace running on success."""
+    """C-x t calls the tmux spawn helper with the configured command."""
     from tuuuui.app import TuuuuiApp
     from tuuuui.core import tmux as tmux_mod
-    from tuuuui.widgets.workspace import Workspace
 
     calls = []
 
@@ -46,4 +45,3 @@ async def test_cx_t_spawns_workspace(tmp_path, monkeypatch):
         await pilot.press("ctrl+x", "t")
         await pilot.pause()
         assert calls == ["claude"]
-        assert app.query_one(Workspace).running is True

@@ -12,12 +12,6 @@ Screen {
     width: 1fr;
 }
 
-#workspace {
-    width: 36;
-    min-width: 24;
-    border-left: solid $accent;
-}
-
 /* The C-x prefix hint shown in the footer area. */
 #prefix-hint {
     dock: bottom;

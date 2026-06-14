@@ -52,8 +52,11 @@ class EmacsTextArea(TextArea):
         Binding("alt+w", "copy_region", "Copy region", show=False),
         Binding("ctrl+space", "set_mark", "Set mark", show=False),
         Binding("ctrl+g", "keyboard_quit", "Quit", show=False),
-        # History / search
+        # History / search. C-/ and C-_ send the same byte (0x1f); terminals
+        # report it as ctrl+underscore. ctrl+z is offered as a familiar alias.
         Binding("ctrl+underscore", "undo", "Undo", show=False),
+        Binding("ctrl+slash", "undo", "Undo", show=False),
+        Binding("ctrl+z", "undo", "Undo", show=False),
         Binding("ctrl+s", "isearch", "Search", show=False),
     ]
 

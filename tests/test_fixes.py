@@ -52,6 +52,45 @@ async def test_syntax_highlighting_is_applied(project: Path):
         assert sum(1 for v in highlights.values() if v) > 0
 
 
+async def test_editor_undo(project: Path):
+    app = TuuuuiApp(project)
+    async with app.run_test() as pilot:
+        app._open_file(project / "b.py")
+        await pilot.pause()
+        editor = app.query_one(Center).file_view.editor
+        original = editor.text
+        editor.move_cursor((0, 0))
+        await pilot.press("Q")  # insert a char
+        await pilot.pause()
+        assert editor.text != original
+        await pilot.press("ctrl+underscore")  # undo (C-/ on most terminals)
+        await pilot.pause()
+        assert editor.text == original
+
+
+async def test_close_file_returns_to_git_view(project: Path):
+    app = TuuuuiApp(project)
+    async with app.run_test() as pilot:
+        app._open_file(project / "a.py")
+        await pilot.pause()
+        assert app.query_one(Center).current == "file-view"
+        assert len(app.buffers) == 1
+        await pilot.press("ctrl+x", "ctrl+c")  # close file
+        await pilot.pause()
+        assert app.query_one(Center).current == "git-view"
+        assert len(app.buffers) == 0  # buffer closed
+
+
+async def test_only_two_panes(project: Path):
+    """The right-hand workspace pane is gone; tmux provides it instead."""
+    app = TuuuuiApp(project)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert len(app.query("#workspace")) == 0
+        assert len(app.query("#filer")) == 1
+        assert len(app.query("#center")) == 1
+
+
 async def test_filer_ctrl_n_moves_down(project: Path):
     app = TuuuuiApp(project)
     async with app.run_test() as pilot:
