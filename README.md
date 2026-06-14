@@ -250,3 +250,7 @@ All four phases implemented (51 tests passing).
 | 2 | Git view (one-line log + colorized diff, commit selection, log auto-refresh / manual diff reload, Unstaged/Staged rows) | ✅ |
 | 3 | Emacs editing (`C-x` prefix) + buffers (`C-x b`) + Markdown toggle | ✅ |
 | 4 | tmux workspace integration + `tuuuui-tmux` launcher | ✅ |
+
+## License
+
+[MIT](LICENSE)

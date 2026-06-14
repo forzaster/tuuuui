@@ -4,6 +4,12 @@ version = "0.1.0"
 description = "A 3-pane terminal IDE: file tree + emacs editor / git view + workspace, built with Textual"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { file = "LICENSE" }
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Environment :: Console",
+]
 dependencies = [
     # The [syntax] extra pulls in tree-sitter + language grammars, which are
     # required for the editor's syntax highlighting to actually render.
