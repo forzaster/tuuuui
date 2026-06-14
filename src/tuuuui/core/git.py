@@ -99,3 +99,24 @@ async def diff_unstaged(cwd: Path) -> str:
 async def show(cwd: Path, sha: str) -> str:
     """Diff introduced by commit *sha*."""
     return await _run_git(cwd, "show", "--patch", "--stat", sha)
+
+
+def changed_paths_from_diff(diff: str) -> list[str]:
+    """Extract the repo-relative file paths touched by a unified *diff*.
+
+    Reads the ``diff --git a/<path> b/<path>`` headers, returning the post-image
+    (``b/``) path for each. Deleted files (``b/dev/null``) are skipped. Paths are
+    relative to the repository root. Order is preserved, duplicates removed.
+    """
+    seen: dict[str, None] = {}
+    for line in diff.splitlines():
+        if not line.startswith("diff --git "):
+            continue
+        marker = line.find(" b/")
+        if marker == -1:
+            continue
+        path = line[marker + 3 :].strip()
+        if not path or path == "dev/null":
+            continue
+        seen.setdefault(path, None)
+    return list(seen)

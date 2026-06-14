@@ -27,7 +27,8 @@ from .core import tmux
 from .core.buffers import BufferManager
 from .widgets.buffer_list import BufferList
 from .widgets.center import Center
-from .widgets.filer import Filer
+from .widgets.filer import Filer, FilerPanel
+from .widgets.git_view import GitView
 
 
 class TuuuuiApp(App):
@@ -64,14 +65,19 @@ class TuuuuiApp(App):
         # Two panes only: the right-hand workspace is a real tmux pane, not an
         # in-app widget (see action_spawn_workspace / --tmux).
         yield Header()
-        yield Filer(str(self.root), id="filer")
+        yield FilerPanel(self.root, id="filer")
         yield Center(self.root, id="center")
         yield Static("", id="prefix-hint")
         yield Footer()
 
     def on_mount(self) -> None:
+        self.query_one(Filer).focus()
         if self.tmux_mode:
             self.action_spawn_workspace()
+
+    def on_git_view_files_changed(self, event: GitView.FilesChanged) -> None:
+        """Mark the changed files (from the shown diff) in the filer."""
+        self.query_one(FilerPanel).set_changed_files(event.paths)
 
     @property
     def center(self) -> Center:
@@ -165,7 +171,12 @@ class TuuuuiApp(App):
                     break
         for offset in range(len(order)):
             pane = self.query_one(f"#{order[(start + offset) % len(order)]}")
-            target = pane if pane.focusable else self._first_focusable(pane)
+            if isinstance(pane, FilerPanel):
+                target = pane.tree  # the file tree, not the checkbox
+            elif pane.focusable:
+                target = pane
+            else:
+                target = self._first_focusable(pane)
             if target is not None:
                 target.focus()
                 return

@@ -18,6 +18,7 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.message import Message
 from textual.widgets import Button, OptionList, Static
 from textual.widgets.option_list import Option
 
@@ -52,6 +53,17 @@ class GitView(Vertical):
         Binding("ctrl+r", "reload_diff", "Reload diff", show=True),
     ]
 
+    class FilesChanged(Message):
+        """Posted when the shown diff changes; carries the touched file paths.
+
+        Paths are absolute. An empty set means the current diff touches nothing
+        (e.g. a clean working tree).
+        """
+
+        def __init__(self, paths: set[Path]) -> None:
+            self.paths = paths
+            super().__init__()
+
     DEFAULT_CSS = """
     GitView { height: 1fr; }
     GitView #log { height: 40%; border-bottom: solid $accent; }
@@ -67,6 +79,7 @@ class GitView(Vertical):
     def __init__(self, repo: Path, **kwargs) -> None:
         super().__init__(**kwargs)
         self._repo = repo
+        self._root: Path | None = None  # repository root (for absolute paths)
         self._commits: list[git.Commit] = []
         # The diff currently shown: a commit sha, or None for the unstaged diff.
         self._current_sha: str | None = None
@@ -78,6 +91,12 @@ class GitView(Vertical):
     def _set_diff(self, renderable: Text) -> None:
         self._diff_text = renderable.plain
         self.query_one("#diff", Static).update(renderable)
+
+    def _emit_changed(self, diff: str) -> None:
+        """Broadcast the set of files touched by *diff* (absolute paths)."""
+        root = self._root or self._repo
+        paths = {(root / rel).resolve() for rel in git.changed_paths_from_diff(diff)}
+        self.post_message(self.FilesChanged(paths))
 
     @property
     def diff_text(self) -> str:
@@ -105,7 +124,12 @@ class GitView(Vertical):
         if not await git.is_repo(self._repo):
             log_widget.clear_options()
             diff_widget.update(Text("Not a git repository.", style="dim"))
+            self.post_message(self.FilesChanged(set()))
             return
+        try:
+            self._root = await git.repo_root(self._repo)
+        except git.GitError:
+            self._root = self._repo
         try:
             self._commits = await git.log(self._repo)
         except git.GitError as exc:
@@ -163,11 +187,13 @@ class GitView(Vertical):
             diff = await git.diff_unstaged(self._repo)
         except git.GitError as exc:
             self._set_diff(Text(f"git error: {exc}", style="red"))
+            self._emit_changed("")
             return
         if diff.strip():
             self._set_diff(_colorize_diff(diff))
         else:
             self._set_diff(Text("No unstaged changes.", style="dim"))
+        self._emit_changed(diff)
 
     async def _show_commit(self, sha: str) -> None:
         self._current_sha = sha
@@ -176,8 +202,10 @@ class GitView(Vertical):
             diff = await git.show(self._repo, sha)
         except git.GitError as exc:
             self._set_diff(Text(f"git error: {exc}", style="red"))
+            self._emit_changed("")
             return
         self._set_diff(_colorize_diff(diff))
+        self._emit_changed(diff)
 
     # -------------------------------------------------------------------- events
     def on_option_list_option_highlighted(
