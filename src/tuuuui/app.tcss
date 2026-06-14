@@ -1,0 +1,33 @@
+Screen {
+    layout: horizontal;
+}
+
+#filer {
+    width: 26;
+    min-width: 18;
+    border-right: solid $accent;
+}
+
+#center {
+    width: 1fr;
+}
+
+#workspace {
+    width: 36;
+    min-width: 24;
+    border-left: solid $accent;
+}
+
+/* The C-x prefix hint shown in the footer area. */
+#prefix-hint {
+    dock: bottom;
+    height: 1;
+    background: $accent;
+    color: $text;
+    padding: 0 1;
+    display: none;
+}
+
+#prefix-hint.active {
+    display: block;
+}

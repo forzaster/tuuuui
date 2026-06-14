@@ -1,0 +1,161 @@
+"""TuuuuiApp — the 3-pane terminal IDE.
+
+Layout: [ Filer | Center (git view / file view) | Workspace ].
+
+Emacs-style ``C-x`` is a *prefix*: press ``C-x`` then a second key. The app
+tracks a pending-prefix state and interprets the next key as a chord:
+
+* ``C-x b``     buffer switcher (recently opened files)
+* ``C-x g``     show the git view
+* ``C-x o``     cycle focus across panes
+* ``C-x C-s``   save (Phase 3 — currently a no-op notice)
+* ``C-x C-c``   quit
+
+``F2`` toggles a Markdown file between raw editing and the rendered view.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.widgets import Footer, Header, Static
+
+from .core.buffers import BufferManager
+from .widgets.buffer_list import BufferList
+from .widgets.center import Center
+from .widgets.filer import Filer
+from .widgets.workspace import Workspace
+
+# Second keys understood after the C-x prefix.
+_CX_CHORDS = {"b", "g", "o", "ctrl+s", "ctrl+c"}
+
+
+class TuuuuiApp(App):
+    """A 3-pane terminal IDE."""
+
+    CSS_PATH = "app.tcss"
+    TITLE = "tuuuui"
+
+    BINDINGS = [
+        Binding("ctrl+x", "cx_prefix", "C-x …", priority=True, show=True),
+        Binding("f2", "toggle_markdown", "MD render", show=True),
+        Binding("ctrl+q", "quit", "Quit", show=True),
+    ]
+
+    def __init__(self, root: Path | None = None) -> None:
+        super().__init__()
+        self.root = Path(root or Path.cwd()).resolve()
+        self.buffers = BufferManager()
+        self._cx_pending = False
+
+    # ----------------------------------------------------------------- layout
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Filer(str(self.root), id="filer")
+        yield Center(self.root, id="center")
+        yield Workspace(id="workspace")
+        yield Static("", id="prefix-hint")
+        yield Footer()
+
+    @property
+    def center(self) -> Center:
+        return self.query_one("#center", Center)
+
+    # ------------------------------------------------------------ file opening
+    def on_filer_file_opened(self, event: Filer.FileOpened) -> None:
+        self._open_file(event.path)
+
+    def _open_file(self, path: Path) -> None:
+        self.buffers.open(path)
+        self.center.show_file(path)
+
+    # ------------------------------------------------------- C-x prefix chords
+    def action_cx_prefix(self) -> None:
+        """Enter pending C-x state; the next key completes the chord."""
+        self._set_pending(True)
+
+    def _set_pending(self, pending: bool) -> None:
+        self._cx_pending = pending
+        hint = self.query_one("#prefix-hint", Static)
+        hint.set_class(pending, "active")
+        if pending:
+            hint.update("C-x  (b: buffers  g: git  o: focus  C-s: save  C-c: quit)")
+
+    def on_key(self, event) -> None:
+        """Complete a C-x chord when a prefix is pending."""
+        if not self._cx_pending:
+            return
+        key = event.key
+        if key == "ctrl+x":
+            # C-x C-x — keep pending, ignore.
+            return
+        self._set_pending(False)
+        if key in _CX_CHORDS:
+            event.stop()
+            event.prevent_default()
+            self._run_chord(key)
+        # Any other key simply cancels the prefix (already cleared above).
+
+    def _run_chord(self, key: str) -> None:
+        if key == "b":
+            self.action_buffer_list()
+        elif key == "g":
+            self.center.show_git()
+        elif key == "o":
+            self.action_cycle_focus()
+        elif key == "ctrl+s":
+            self.action_save()
+        elif key == "ctrl+c":
+            self.action_quit()
+
+    # ------------------------------------------------------------- chord actions
+    def action_buffer_list(self) -> None:
+        if len(self.buffers) == 0:
+            self.notify("No open buffers yet.", severity="warning")
+            return
+
+        def _picked(path: Path | None) -> None:
+            if path is not None:
+                self._open_file(path)
+
+        self.push_screen(BufferList(self.buffers), _picked)
+
+    def action_cycle_focus(self) -> None:
+        order = ["filer", "center", "workspace"]
+        focused = self.focused
+        start = 0
+        if focused is not None:
+            for i, pane_id in enumerate(order):
+                pane = self.query_one(f"#{pane_id}")
+                if focused is pane or focused in pane.walk_children():
+                    start = (i + 1) % len(order)
+                    break
+        for offset in range(len(order)):
+            pane = self.query_one(f"#{order[(start + offset) % len(order)]}")
+            target = pane if pane.focusable else self._first_focusable(pane)
+            if target is not None:
+                target.focus()
+                return
+
+    @staticmethod
+    def _first_focusable(widget):
+        for child in widget.walk_children():
+            if child.focusable:
+                return child
+        return None
+
+    def action_save(self) -> None:
+        # Editing/saving lands in Phase 3.
+        self.notify("Save (C-x C-s) arrives in Phase 3.", severity="information")
+
+    def action_toggle_markdown(self) -> None:
+        if not self.center.showing_file:
+            return
+        fv = self.center.file_view
+        if not fv.can_toggle_markdown():
+            self.notify("Not a Markdown file.", severity="warning")
+            return
+        rendered = fv.toggle_markdown()
+        self.notify("Markdown: rendered" if rendered else "Markdown: raw")
