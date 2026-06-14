@@ -26,6 +26,7 @@ from textual.widgets import Button, OptionList, Static
 from textual.widgets.option_list import Option
 
 from ..core import git
+from .emacs_list import EmacsOptionList
 
 # How often to poll `git log` for new commits.
 LOG_REFRESH_SECONDS = 5.0
@@ -111,7 +112,7 @@ class GitView(Vertical):
         return self._diff_text
 
     def compose(self) -> ComposeResult:
-        yield OptionList(id="log")
+        yield EmacsOptionList(id="log")
         with Horizontal(id="diff-header"):
             yield Static("Unstaged diff", id="diff-title")
             yield Button("⟳ Reload", id="reload-diff", variant="primary")

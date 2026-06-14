@@ -17,6 +17,7 @@ from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
 
 from ..core.buffers import BufferManager
+from .emacs_list import EmacsOptionList
 
 
 class BufferList(ModalScreen[Path | None]):
@@ -45,7 +46,7 @@ class BufferList(ModalScreen[Path | None]):
                 Option(self._label(b.path), id=str(b.path))
                 for b in self._manager.buffers
             ]
-            yield OptionList(*options, id="buffers")
+            yield EmacsOptionList(*options, id="buffers")
 
     def _label(self, path: Path) -> str:
         return f"{path.name}    [dim]{path.parent}[/dim]"

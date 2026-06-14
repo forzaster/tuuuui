@@ -71,12 +71,26 @@ role.
   **● Unstaged changes** / **● Staged changes**, followed by `git log` one line
   per commit (scrollable). The commit part **auto-refreshes** so new commits
   appear on their own (the highlighted row and scroll position are preserved).
+  Navigate with the arrows or emacs `C-n`/`C-p` (this also applies to the
+  `C-x b` buffer list).
 - **Bottom**: the diff for the highlighted row — unstaged diff / staged diff
   (`git diff --cached`) / the selected commit's diff. The diff does not auto-poll;
   reload it explicitly with the ⟳ button or `C-r` (handy while editing). Added =
   green, removed = red, hunk = cyan.
 - The files in the shown diff also drive the filer's markers and the "Changed
   only" filter (works for Unstaged, Staged, and any commit).
+
+### Center mode switching (Tab)
+- `Tab` cycles the center pane: **git view → editor → shell** (the editor is
+  skipped when no file is open). It works even from the editor, so the same key
+  flips back to the git view.
+
+### Shell (center)
+- The center also has a **lightweight command runner**: type a command, press
+  Enter, and its combined stdout/stderr is appended to a scrollable log. Runs in
+  the project root; `C-n`/`C-p` recall command history.
+- It is **not** a PTY — full-screen interactive programs (`vim`, `top`, `less`)
+  are not supported; use the tmux workspace pane (`C-x t`) for those.
 
 ### Workspace (right)
 - Inside tmux, `C-x t` (or `--tmux` at launch) splits a CLI pane on the right.
@@ -114,12 +128,15 @@ src/tuuuui/
     git.py             async git helpers (log / diff / show)
     buffers.py         BufferManager: MRU buffer management
     tmux.py            launching the tmux split pane
+    shell.py           async command runner (run a command, capture output)
   widgets/
     filer.py           left: file tree (emacs navigation)
-    center.py          center: GitView <-> FileView switching
+    center.py          center: GitView / FileView / ShellView switching (Tab)
     file_view.py       center: editor + Markdown rendering
     git_view.py        center: commit log + diff
+    shell.py           center: lightweight command runner
     emacs.py           emacs keybinding layer (EmacsTextArea)
+    emacs_list.py      OptionList with C-n/C-p navigation
     search.py          C-s search modal
     buffer_list.py     C-x b buffer-switch modal
 docs/superpowers/specs/ design document
@@ -201,6 +218,7 @@ opened file with `C-x b`. Start the AI CLI on the right with `C-x t`.
 
 | Key | Action |
 |-----|--------|
+| `Tab` | switch center mode: git view / editor / shell |
 | `C-x b` | switch buffer (recently opened files) |
 | `C-x g` | show the git view |
 | `C-x o` | cycle focus between panes |

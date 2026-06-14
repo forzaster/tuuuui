@@ -42,6 +42,9 @@ class TuuuuiApp(App):
 
     BINDINGS = [
         Binding("ctrl+x", "cx_prefix", "C-x …", priority=True, show=True),
+        # Tab cycles the center pane: git view -> editor -> shell. Priority so it
+        # wins over the focused widget (editor / log) and the default Tab=focus.
+        Binding("tab", "switch_center", "Switch center", priority=True, show=True),
         Binding("f2", "toggle_markdown", "MD render", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True),
     ]
@@ -159,6 +162,26 @@ class TuuuuiApp(App):
                 self._open_file(path)
 
         self.push_screen(BufferList(self.buffers), _picked)
+
+    def action_switch_center(self) -> None:
+        """Tab: cycle the center pane mode (git / editor / shell).
+
+        While a modal screen is open, keep Tab's default meaning (focus next) so
+        modal navigation still works.
+        """
+        if len(self.screen_stack) > 1:
+            self.screen.focus_next()
+            return
+        current = self.center.cycle()
+        self._focus_center(current)
+
+    def _focus_center(self, current: str) -> None:
+        if current == "git-view":
+            self.center.git_view.query_one("#log").focus()
+        elif current == "file-view":
+            self.center.file_view.editor.focus()
+        elif current == "shell-view":
+            self.center.shell_view.input.focus()
 
     def action_cycle_focus(self) -> None:
         order = ["filer", "center"]
