@@ -27,14 +27,32 @@ A 3-pane terminal IDE built with [Textual](https://textual.textualize.io/).
 
 ## Status
 
-Built in phases. See `docs/superpowers/specs/` for the design.
+All four phases implemented (28 tests passing). See
+`docs/superpowers/specs/` for the design.
 
-| Phase | Scope |
-|-------|-------|
-| 1 | 3-pane skeleton + filer + file view (read-only) |
-| 2 | Git view (log + diff) |
-| 3 | Emacs editing (C-x prefix) + buffers (C-x b) + markdown toggle |
-| 4 | tmux workspace integration |
+| Phase | Scope | State |
+|-------|-------|-------|
+| 1 | 3-pane skeleton + filer + file view (syntax highlight) | ✅ |
+| 2 | Git view (one-line log + colorized diff, commit selection) | ✅ |
+| 3 | Emacs editing (C-x prefix) + buffers (C-x b) + markdown toggle | ✅ |
+| 4 | tmux workspace integration | ✅ |
+
+## Keys
+
+| Key | Action |
+|-----|--------|
+| `C-x b` | switch buffer (recently opened files) |
+| `C-x g` | show git view |
+| `C-x o` | cycle focus across panes |
+| `C-x t` | open the tmux workspace pane |
+| `C-x C-s` | save the current file |
+| `C-x C-c` / `C-q` | quit |
+| `F2` | toggle Markdown raw ⇄ rendered |
+| `C-a/C-e/C-f/C-b/C-n/C-p` | move (line start/end, char, line) |
+| `M-f/M-b`, `M-d` | word move / kill word |
+| `C-k` `C-y` | kill line / yank |
+| `C-space`, `C-w`, `M-w` | set mark / kill region / copy region |
+| `C-s`, `C-_` | search forward / undo |
 
 ## Develop
 
