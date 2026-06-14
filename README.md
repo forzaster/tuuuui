@@ -20,8 +20,10 @@ A 3-pane terminal IDE built with [Textual](https://textual.textualize.io/).
   - *File view*: editable with emacs keybindings; Markdown can toggle between
     raw editing and rendered display via a shortcut key.
   - *Git view*: split top/bottom. Top is one-line-per-commit `git log`
-    (scrollable); bottom shows the diff for the selected commit (unstaged diff
-    by default).
+    (scrollable), which **auto-refreshes** so new commits appear on their own
+    (the highlighted commit is preserved). Bottom shows the diff for the
+    selected commit (unstaged diff by default); the diff is **reloaded on
+    demand** with the ⟳ button or `C-r`.
 - **Right — Workspace**: a tmux pane running an interactive CLI such as
   `claude code` or GitHub Copilot CLI.
 
@@ -45,6 +47,7 @@ All four phases implemented (28 tests passing). See
 | `C-x g` | show git view |
 | `C-x o` | cycle focus across panes |
 | `C-x t` | open the tmux workspace pane |
+| `C-r` | reload the git diff (in git view) |
 | `C-x C-s` | save the current file |
 | `C-x C-c` / `C-q` | quit |
 | `F2` | toggle Markdown raw ⇄ rendered |
