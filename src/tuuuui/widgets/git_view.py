@@ -1,9 +1,12 @@
 """Center pane (git mode): a source list over a diff.
 
 Top: a selectable list whose first two rows are the working-tree **Unstaged** and
-**Staged** changes, followed by one line per commit (`git log`). The commit part
-**auto-refreshes** on an interval so new commits appear without interaction; the
-highlighted row and scroll position are preserved across refreshes.
+**Staged** changes, followed by one line per commit (`git log`). Commits are
+loaded a page at a time (:data:`PAGE_SIZE`); when more history is available a
+**Load next** row sits at the bottom — selecting it appends the next page. The
+commit part **auto-refreshes** on an interval so new commits appear without
+interaction; the highlighted row and scroll position are preserved across
+refreshes.
 
 Bottom: the diff for the highlighted row — unstaged diff, staged diff, or the
 selected commit's diff. The diff does **not** auto-poll — press the reload button
@@ -30,9 +33,14 @@ from ..core import git
 # How often to poll `git log` for new commits.
 LOG_REFRESH_SECONDS = 5.0
 
+# How many commits to load per page (initial load and each "Load next").
+PAGE_SIZE = 50
+
 # Synthetic row ids for the working-tree entries at the top of the list.
 UNSTAGED_ID = "__unstaged__"
 STAGED_ID = "__staged__"
+# Synthetic row id for the "Load next N commits" row at the bottom.
+MORE_ID = "__more__"
 
 
 def _colorize_diff(diff: str) -> Text:
@@ -88,6 +96,10 @@ class GitView(Vertical):
         self._repo = repo
         self._root: Path | None = None  # repository root (for absolute paths)
         self._commits: list[git.Commit] = []
+        # Number of pages currently loaded; refresh re-fetches this many.
+        self._page_count = 1
+        # Whether more commits remain beyond the loaded pages (drives MORE row).
+        self._has_more = False
         # Id of the row whose diff is currently shown: UNSTAGED_ID, STAGED_ID,
         # or a commit sha. Used to re-fetch on reload.
         self._current_id: str = UNSTAGED_ID
@@ -138,11 +150,13 @@ class GitView(Vertical):
             self._root = await git.repo_root(self._repo)
         except git.GitError:
             self._root = self._repo
+        self._page_count = 1
         try:
-            self._commits = await git.log(self._repo)
+            self._commits = await git.log(self._repo, max_count=PAGE_SIZE)
         except git.GitError as exc:
             self._set_diff(Text(f"git error: {exc}", style="red"))
             return
+        self._has_more = len(self._commits) == PAGE_SIZE
         self._populate_log(self._commits)
         log_widget.highlighted = 0  # default to the Unstaged row
         await self._show_unstaged()
@@ -155,11 +169,19 @@ class GitView(Vertical):
             Option(Text("● Staged changes", style="green"), id=STAGED_ID),
             *(Option(c.one_line(), id=c.sha) for c in commits),
         ]
+        if self._has_more:
+            options.append(
+                Option(Text(f"⋯ Load next {PAGE_SIZE} commits", style="dim"),
+                       id=MORE_ID)
+            )
         log_widget.add_options(options)
 
     def _option_ids(self) -> list[str]:
-        """All row ids in display order (synthetic rows first, then commits)."""
-        return [UNSTAGED_ID, STAGED_ID, *(c.sha for c in self._commits)]
+        """All row ids in display order (synthetic rows, commits, MORE row)."""
+        ids = [UNSTAGED_ID, STAGED_ID, *(c.sha for c in self._commits)]
+        if self._has_more:
+            ids.append(MORE_ID)
+        return ids
 
     # ------------------------------------------------------ periodic log refresh
     def _refresh_log(self) -> None:
@@ -168,30 +190,64 @@ class GitView(Vertical):
     async def _do_refresh_log(self) -> None:
         if not await git.is_repo(self._repo):
             return
+        count = self._page_count * PAGE_SIZE
         try:
-            commits = await git.log(self._repo)
+            commits = await git.log(self._repo, max_count=count)
         except git.GitError:
             return
-        if [c.sha for c in commits] == [c.sha for c in self._commits]:
+        has_more = len(commits) == count
+        if (has_more == self._has_more
+                and [c.sha for c in commits] == [c.sha for c in self._commits]):
             return  # nothing changed
         self._commits = commits
+        self._has_more = has_more
+        self._rebuild_log()
+
+    def _rebuild_log(self, *, prefer_id: str | None = None) -> None:
+        """Repopulate the list, preserving the highlighted row by id.
+
+        Runs without letting the highlight change reload the diff. *prefer_id*
+        overrides the row to keep highlighted (e.g. the MORE row after a load).
+        """
         log_widget = self.query_one("#log", OptionList)
-        # Remember which row was highlighted (commit sha or synthetic id).
-        kept_id: str | None = None
-        if log_widget.highlighted is not None:
+        kept_id = prefer_id
+        if kept_id is None and log_widget.highlighted is not None:
             try:
                 kept_id = log_widget.get_option_at_index(log_widget.highlighted).id
             except Exception:
                 kept_id = None
-        # Repopulate without letting the highlight change reload the diff.
         self._suppress_highlight = True
         try:
-            self._populate_log(commits)
+            self._populate_log(self._commits)
             ids = self._option_ids()
             if kept_id in ids:
                 log_widget.highlighted = ids.index(kept_id)
+            elif log_widget.option_count:
+                last = log_widget.option_count - 1
+                if log_widget.highlighted is None or log_widget.highlighted > last:
+                    log_widget.highlighted = last
         finally:
             self._suppress_highlight = False
+
+    # --------------------------------------------------------------- load more
+    def _load_more(self) -> None:
+        self.run_worker(self._do_load_more(), group="git-load", exclusive=True)
+
+    async def _do_load_more(self) -> None:
+        if not self._has_more:
+            return
+        self._page_count += 1
+        count = self._page_count * PAGE_SIZE
+        try:
+            commits = await git.log(self._repo, max_count=count)
+        except git.GitError:
+            self._page_count -= 1
+            return
+        self._commits = commits
+        self._has_more = len(commits) == count
+        # Keep the highlight on the MORE row so repeated loads are easy; if the
+        # history is now fully loaded it falls back to the last commit row.
+        self._rebuild_log(prefer_id=MORE_ID)
 
     # --------------------------------------------------------------- diff loaders
     async def _show_worktree(self, *, staged: bool) -> None:
@@ -237,6 +293,8 @@ class GitView(Vertical):
             coro = self._show_unstaged()
         elif option_id == STAGED_ID:
             coro = self._show_staged()
+        elif option_id == MORE_ID:
+            return  # the MORE row has no diff; loading happens on selection
         elif option_id:
             coro = self._show_commit(option_id)
         else:
@@ -249,6 +307,15 @@ class GitView(Vertical):
         if event.option_list.id != "log" or self._suppress_highlight:
             return
         self._select(event.option.id)
+
+    def on_option_list_option_selected(
+        self, event: OptionList.OptionSelected
+    ) -> None:
+        if event.option_list.id != "log":
+            return
+        if event.option.id == MORE_ID:
+            event.stop()
+            self._load_more()
 
     def action_reload_diff(self) -> None:
         """Re-fetch the diff currently shown (unstaged / staged / commit)."""
