@@ -8,6 +8,7 @@ tracks a pending-prefix state and interprets the next key as a chord:
 
 * ``C-x b``     buffer switcher (recently opened files)
 * ``C-x g``     show the git view
+* ``C-x r``     show the rgrep view (recursive grep)
 * ``C-x o``     cycle focus across panes
 * ``C-x C-s``   save (Phase 3 — currently a no-op notice)
 * ``C-x C-c``   quit
@@ -30,6 +31,7 @@ from .widgets.center import Center
 from .widgets.confirm import ConfirmScreen
 from .widgets.filer import Filer, FilerPanel
 from .widgets.git_view import GitView
+from .widgets.rgrep_view import RGrepView
 
 
 class TuuuuiApp(App):
@@ -80,6 +82,10 @@ class TuuuuiApp(App):
         """Mark the changed files (from the shown diff) in the filer."""
         self.query_one(FilerPanel).set_changed_files(event.paths)
 
+    def on_rgrep_view_open_match(self, event: RGrepView.OpenMatch) -> None:
+        """Open the file from an rgrep result at the matching line."""
+        self._open_file(event.path, line=event.line)
+
     @property
     def center(self) -> Center:
         return self.query_one("#center", Center)
@@ -88,9 +94,9 @@ class TuuuuiApp(App):
     def on_filer_file_opened(self, event: Filer.FileOpened) -> None:
         self._open_file(event.path)
 
-    def _open_file(self, path: Path) -> None:
+    def _open_file(self, path: Path, *, line: int | None = None) -> None:
         self.buffers.open(path)
-        self.center.show_file(path)
+        self.center.show_file(path, line=line)
         # Move focus to the editor so emacs keys act on the file immediately.
         self.center.file_view.editor.focus()
 
@@ -113,7 +119,7 @@ class TuuuuiApp(App):
         hint.set_class(pending, "active")
         if pending:
             hint.update(
-                "C-x  (b: buffers  g: git  o: focus  t: workspace  "
+                "C-x  (b: buffers  g: git  r: rgrep  o: focus  t: workspace  "
                 "C-s: save  C-c: close file)"
             )
 
@@ -138,6 +144,8 @@ class TuuuuiApp(App):
             self.action_buffer_list()
         elif key == "g":
             self.center.show_git()
+        elif key == "r":
+            self.action_rgrep()
         elif key == "o":
             self.action_cycle_focus()
         elif key == "t":
@@ -159,6 +167,11 @@ class TuuuuiApp(App):
                 self._open_file(path)
 
         self.push_screen(BufferList(self.buffers), _picked)
+
+    def action_rgrep(self) -> None:
+        """Show the rgrep view and focus its search input (C-x r)."""
+        self.center.show_rgrep()
+        self.center.rgrep_view.focus_input()
 
     def action_cycle_focus(self) -> None:
         order = ["filer", "center"]

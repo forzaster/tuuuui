@@ -71,10 +71,19 @@ def _read_text(path: Path) -> tuple[str, bool]:
 class Editor(EmacsTextArea):
     """Syntax-highlighting text editor with emacs keybindings."""
 
-    def load(self, path: Path, text: str, *, read_only: bool) -> None:
+    def load(
+        self, path: Path, text: str, *, read_only: bool, line: int | None = None
+    ) -> None:
         self.read_only = read_only
         self.load_text(text)
-        self.move_cursor((0, 0))
+        # *line* is 1-based; clamp into range and place the cursor there. The
+        # move is deferred: load_text resets the cursor on the next refresh, so
+        # a synchronous move_cursor here would be overwritten.
+        if line is not None and self.document.line_count:
+            row = max(0, min(line - 1, self.document.line_count - 1))
+        else:
+            row = 0
+        self.call_after_refresh(self.move_cursor, (row, 0))
         try:
             self.language = language_for(path)
         except LanguageDoesNotExist:
@@ -114,12 +123,15 @@ class FileView(Container):
     def path(self) -> Path | None:
         return self._path
 
-    def open_path(self, path: Path) -> None:
-        """Load *path* into the editor (raw view). Binary/unreadable -> read-only."""
+    def open_path(self, path: Path, *, line: int | None = None) -> None:
+        """Load *path* into the editor (raw view). Binary/unreadable -> read-only.
+
+        *line* (1-based, optional) positions the cursor on that line.
+        """
         self._path = path
         text, is_error = _read_text(path)
         read_only = self._force_read_only or is_error
-        self.editor.load(path, text, read_only=read_only)
+        self.editor.load(path, text, read_only=read_only, line=line)
         # Snapshot what the editor actually holds (post any normalization).
         self._clean_text = self.editor.text
         self.query_one(ContentSwitcher).current = "editor"
