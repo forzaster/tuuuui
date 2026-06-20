@@ -39,6 +39,10 @@ WORKTREE_REFRESH_SECONDS = 2.0
 UNSTAGED_ID = "__unstaged__"
 STAGED_ID = "__staged__"
 
+# Style for the branch-base row (the commit `origin/develop` points to).
+BASE_STYLE = "bold magenta"
+BASE_MARKER = "◆"
+
 
 def _colorize_diff(diff: str) -> Text:
     """Render a unified diff with added/removed/hunk colors."""
@@ -104,6 +108,10 @@ class GitView(Vertical):
         # Raw working-tree diff last rendered; lets the poller skip a re-render
         # when nothing changed (avoids flicker / scroll reset).
         self._last_worktree_diff: str | None = None
+        # The branch base (e.g. "origin/develop") and the sha it points at, so
+        # that commit row is marked. Both None when there's no remote default.
+        self._base_label: str | None = None
+        self._base_sha: str | None = None
 
     def _set_diff(self, renderable: Text) -> None:
         self._diff_text = renderable.plain
@@ -154,9 +162,25 @@ class GitView(Vertical):
         except git.GitError as exc:
             self._set_diff(Text(f"git error: {exc}", style="red"))
             return
+        await self._resolve_base()
         self._populate_log(self._commits)
         log_widget.highlighted = 0  # default to the Unstaged row
         await self._show_unstaged()
+
+    async def _resolve_base(self) -> None:
+        """Look up the branch base (origin/develop) and the commit it marks."""
+        self._base_label = await git.base_ref(self._repo)
+        self._base_sha = (
+            await git.rev(self._repo, self._base_label) if self._base_label else None
+        )
+
+    def _commit_option(self, commit: git.Commit) -> Option:
+        """Build a log row, highlighting the branch-base commit distinctly."""
+        if self._base_sha is not None and commit.sha == self._base_sha:
+            text = Text(f"{BASE_MARKER} {self._base_label}  ", style=BASE_STYLE)
+            text.append(commit.one_line(), style="magenta")
+            return Option(text, id=commit.sha)
+        return Option(commit.one_line(), id=commit.sha)
 
     def _populate_log(self, commits: list[git.Commit]) -> None:
         log_widget = self.query_one("#log", OptionList)
@@ -164,7 +188,7 @@ class GitView(Vertical):
         options = [
             Option(Text("● Unstaged changes", style="yellow"), id=UNSTAGED_ID),
             Option(Text("● Staged changes", style="green"), id=STAGED_ID),
-            *(Option(c.one_line(), id=c.sha) for c in commits),
+            *(self._commit_option(c) for c in commits),
         ]
         log_widget.add_options(options)
 

@@ -73,6 +73,10 @@ role.
   appear on their own (the highlighted row and scroll position are preserved).
   Navigate with the arrows or emacs `C-n`/`C-p` (this also applies to the
   `C-x b` buffer list).
+- The commit your branch forks from — the remote's default branch, e.g.
+  `origin/develop` (read from `origin/HEAD`) — is marked with a `◆` and a
+  distinct **magenta** colour, so it's easy to see which commits are your
+  branch's own work.
 - **Bottom**: the diff for the highlighted row — unstaged diff / staged diff
   (`git diff --cached`) / the selected commit's diff. The diff does not auto-poll;
   reload it explicitly with the ⟳ button or `C-r` (handy while editing). Added =
