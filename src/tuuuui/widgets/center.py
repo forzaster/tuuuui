@@ -24,12 +24,13 @@ SHELL_VIEW = "shell-view"
 class Center(ContentSwitcher):
     """ContentSwitcher holding the git view, the file view, and the shell."""
 
-    def __init__(self, repo: Path, **kwargs) -> None:
+    def __init__(self, repo: Path, *, watch: bool = False, **kwargs) -> None:
         super().__init__(initial=GIT_VIEW, **kwargs)
         self._repo = repo
+        self._watch = watch
 
     def compose(self) -> ComposeResult:
-        yield GitView(self._repo, id=GIT_VIEW)
+        yield GitView(self._repo, poll_worktree=self._watch, id=GIT_VIEW)
         yield FileView(id=FILE_VIEW)
         yield ShellView(self._repo, id=SHELL_VIEW)
 

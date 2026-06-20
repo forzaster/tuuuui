@@ -23,13 +23,16 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer, Header, Static
 
-from .core import tmux, watcher
+from .core import tmux
 from .core.buffers import BufferManager
 from .widgets.buffer_list import BufferList
 from .widgets.center import Center
 from .widgets.confirm import ConfirmScreen
 from .widgets.filer import Filer, FilerPanel
 from .widgets.git_view import GitView
+
+# How often to re-stat the open file for external edits (auto-reload).
+OPEN_FILE_POLL_SECONDS = 2.0
 
 
 class TuuuuiApp(App):
@@ -72,7 +75,7 @@ class TuuuuiApp(App):
         # in-app widget (see action_spawn_workspace / --tmux).
         yield Header()
         yield FilerPanel(self.root, id="filer")
-        yield Center(self.root, id="center")
+        yield Center(self.root, watch=self.watch, id="center")
         yield Static("", id="prefix-hint")
         yield Footer()
 
@@ -81,32 +84,23 @@ class TuuuuiApp(App):
         if self.tmux_mode:
             self.action_spawn_workspace()
         if self.watch:
-            self.run_worker(self._watch_filesystem(), name="fs-watch")
+            # Poll the open file for external edits; the git view polls its own
+            # working-tree diff (which also repaints the filer markers).
+            self.set_interval(OPEN_FILE_POLL_SECONDS, self._poll_open_file)
 
-    async def _watch_filesystem(self) -> None:
-        """Background task: refresh on external file changes under the root."""
-        try:
-            async for changed in watcher.awatch_paths(self.root):
-                self._handle_fs_changes(changed)
-        except Exception:  # never let the watcher take down the app
-            pass
-
-    def _handle_fs_changes(self, changed: set[Path]) -> None:
-        """React to an external batch of file changes (paths are resolved)."""
-        # Re-fetch the currently shown diff (same as C-r). This re-emits
-        # GitView.FilesChanged, which repaints the filer's changed-file markers.
-        self.center.git_view.action_reload_diff()
-        # Reload the open file if it changed on disk — but never discard the
-        # user's unsaved edits.
+    def _poll_open_file(self) -> None:
+        """Reload the open file if it changed on disk, preserving unsaved edits."""
+        if not self.center.showing_file:
+            return
         fv = self.center.file_view
-        path = fv.path
-        if path is None or path.resolve() not in changed:
+        if fv.path is None or not fv.disk_changed():
             return
         if fv.is_modified:
             self.notify(
-                f"{path.name} changed on disk; kept your unsaved edits.",
+                f"{fv.path.name} changed on disk; kept your unsaved edits.",
                 severity="warning",
             )
+            fv.mark_disk_seen()  # don't re-notify every tick for the same change
             return
         fv.reload()
 
