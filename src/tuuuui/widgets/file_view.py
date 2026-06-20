@@ -100,6 +100,9 @@ class FileView(Container):
         self._path: Path | None = None
         # Text as last loaded or saved; used to detect unsaved edits.
         self._clean_text: str = ""
+        # (mtime_ns, size) of the file as last read/written; used to detect an
+        # external change on disk. None until a file is open.
+        self._disk_stat: tuple[int, int] | None = None
 
     def compose(self) -> ComposeResult:
         with ContentSwitcher(initial="editor"):
@@ -122,7 +125,48 @@ class FileView(Container):
         self.editor.load(path, text, read_only=read_only)
         # Snapshot what the editor actually holds (post any normalization).
         self._clean_text = self.editor.text
+        self._snapshot_disk_stat()
         self.query_one(ContentSwitcher).current = "editor"
+
+    def _snapshot_disk_stat(self) -> None:
+        """Record the open file's (mtime_ns, size) for external-change detection."""
+        if self._path is None:
+            self._disk_stat = None
+            return
+        try:
+            st = self._path.stat()
+            self._disk_stat = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            self._disk_stat = None
+
+    def disk_changed(self) -> bool:
+        """True if the file on disk differs from what we last read/wrote."""
+        if self._path is None:
+            return False
+        try:
+            st = self._path.stat()
+        except OSError:
+            return False
+        return (st.st_mtime_ns, st.st_size) != self._disk_stat
+
+    def mark_disk_seen(self) -> None:
+        """Acknowledge the current on-disk state without reloading the buffer."""
+        self._snapshot_disk_stat()
+
+    def reload(self) -> None:
+        """Re-read the open file from disk, keeping the cursor where possible.
+
+        Refuses when the buffer has unsaved edits so an external change never
+        silently discards the user's work (callers should check first).
+        """
+        if self._path is None or self.is_modified:
+            return
+        cursor = self.editor.cursor_location
+        self.open_path(self._path)
+        try:
+            self.editor.move_cursor(cursor)
+        except Exception:
+            pass
 
     @property
     def read_only(self) -> bool:
@@ -144,6 +188,7 @@ class FileView(Container):
         text = self.editor.text
         self._atomic_write(self._path, text)
         self._clean_text = text
+        self._snapshot_disk_stat()
         return self._path
 
     @staticmethod

@@ -30,11 +30,22 @@ def main() -> None:
         help="Command to run in the workspace pane (default: $TUUUUI_WORKSPACE_CMD "
         "or 'claude').",
     )
+    parser.add_argument(
+        "--no-watch",
+        dest="watch",
+        action="store_false",
+        help="Disable real-time file watching (no auto-refresh on external edits).",
+    )
     args = parser.parse_args()
     root = Path(args.path).expanduser().resolve()
     if not root.is_dir():
         parser.error(f"not a directory: {root}")
-    TuuuuiApp(root, workspace_cmd=args.workspace, tmux_mode=args.tmux).run()
+    TuuuuiApp(
+        root,
+        workspace_cmd=args.workspace,
+        tmux_mode=args.tmux,
+        watch=args.watch,
+    ).run()
 
 
 if __name__ == "__main__":

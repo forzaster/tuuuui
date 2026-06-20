@@ -73,12 +73,25 @@ role.
   appear on their own (the highlighted row and scroll position are preserved).
   Navigate with the arrows or emacs `C-n`/`C-p` (this also applies to the
   `C-x b` buffer list).
+- The commit your branch forks from — the remote's default branch, e.g.
+  `origin/develop` (read from `origin/HEAD`) — is marked with a `◆` and a
+  distinct **magenta** colour, so it's easy to see which commits are your
+  branch's own work.
 - **Bottom**: the diff for the highlighted row — unstaged diff / staged diff
   (`git diff --cached`) / the selected commit's diff. The diff does not auto-poll;
   reload it explicitly with the ⟳ button or `C-r` (handy while editing). Added =
   green, removed = red, hunk = cyan.
 - The files in the shown diff also drive the filer's markers and the "Changed
   only" filter (works for Unstaged, Staged, and any commit).
+
+### Auto-refresh on external edits
+- The working-tree diff is re-polled on a short interval, so external edits
+  (e.g. Claude Code writing files) **auto-refresh** the git view and the filer's
+  changed-file markers — no manual `C-r` needed. (No extra dependency: it just
+  re-runs `git diff` and only re-renders when the diff actually changed.)
+- If the file you have open changes on disk it reloads automatically; when you
+  have **unsaved edits** it is left untouched and you get a notice instead.
+- Launch with `--no-watch` to disable the polling and refresh manually.
 
 ### Center mode switching (Tab)
 - `Tab` cycles the center pane: **git view → editor → shell** (the editor is

@@ -31,9 +31,17 @@ from .emacs_list import EmacsOptionList
 # How often to poll `git log` for new commits.
 LOG_REFRESH_SECONDS = 5.0
 
+# How often to re-fetch the working-tree diff so external edits show up without
+# a manual reload. The diff is only re-rendered when it actually changed.
+WORKTREE_REFRESH_SECONDS = 2.0
+
 # Synthetic row ids for the working-tree entries at the top of the list.
 UNSTAGED_ID = "__unstaged__"
 STAGED_ID = "__staged__"
+
+# Style for the branch-base row (the commit `origin/develop` points to).
+BASE_STYLE = "bold magenta"
+BASE_MARKER = "◆"
 
 
 def _colorize_diff(diff: str) -> Text:
@@ -84,9 +92,10 @@ class GitView(Vertical):
     GitView #diff { padding: 0 1; }
     """
 
-    def __init__(self, repo: Path, **kwargs) -> None:
+    def __init__(self, repo: Path, *, poll_worktree: bool = False, **kwargs) -> None:
         super().__init__(**kwargs)
         self._repo = repo
+        self._poll_worktree = poll_worktree
         self._root: Path | None = None  # repository root (for absolute paths)
         self._commits: list[git.Commit] = []
         # Id of the row whose diff is currently shown: UNSTAGED_ID, STAGED_ID,
@@ -96,6 +105,13 @@ class GitView(Vertical):
         self._suppress_highlight = False
         # Plain text of the diff currently shown (for inspection/tests).
         self._diff_text = ""
+        # Raw working-tree diff last rendered; lets the poller skip a re-render
+        # when nothing changed (avoids flicker / scroll reset).
+        self._last_worktree_diff: str | None = None
+        # The branch base (e.g. "origin/develop") and the sha it points at, so
+        # that commit row is marked. Both None when there's no remote default.
+        self._base_label: str | None = None
+        self._base_sha: str | None = None
 
     def _set_diff(self, renderable: Text) -> None:
         self._diff_text = renderable.plain
@@ -122,6 +138,8 @@ class GitView(Vertical):
     def on_mount(self) -> None:
         self.reload()
         self.set_interval(LOG_REFRESH_SECONDS, self._refresh_log)
+        if self._poll_worktree:
+            self.set_interval(WORKTREE_REFRESH_SECONDS, self._refresh_worktree_diff)
 
     # ----------------------------------------------------------------- full load
     def reload(self) -> None:
@@ -144,9 +162,25 @@ class GitView(Vertical):
         except git.GitError as exc:
             self._set_diff(Text(f"git error: {exc}", style="red"))
             return
+        await self._resolve_base()
         self._populate_log(self._commits)
         log_widget.highlighted = 0  # default to the Unstaged row
         await self._show_unstaged()
+
+    async def _resolve_base(self) -> None:
+        """Look up the branch base (origin/develop) and the commit it marks."""
+        self._base_label = await git.base_ref(self._repo)
+        self._base_sha = (
+            await git.rev(self._repo, self._base_label) if self._base_label else None
+        )
+
+    def _commit_option(self, commit: git.Commit) -> Option:
+        """Build a log row, highlighting the branch-base commit distinctly."""
+        if self._base_sha is not None and commit.sha == self._base_sha:
+            text = Text(f"{BASE_MARKER} {self._base_label}  ", style=BASE_STYLE)
+            text.append(commit.one_line(), style="magenta")
+            return Option(text, id=commit.sha)
+        return Option(commit.one_line(), id=commit.sha)
 
     def _populate_log(self, commits: list[git.Commit]) -> None:
         log_widget = self.query_one("#log", OptionList)
@@ -154,7 +188,7 @@ class GitView(Vertical):
         options = [
             Option(Text("● Unstaged changes", style="yellow"), id=UNSTAGED_ID),
             Option(Text("● Staged changes", style="green"), id=STAGED_ID),
-            *(Option(c.one_line(), id=c.sha) for c in commits),
+            *(self._commit_option(c) for c in commits),
         ]
         log_widget.add_options(options)
 
@@ -194,18 +228,49 @@ class GitView(Vertical):
         finally:
             self._suppress_highlight = False
 
+    # ------------------------------------------------ periodic worktree refresh
+    def _refresh_worktree_diff(self) -> None:
+        """Poll the working-tree diff so external edits show without a reload."""
+        if self._current_id not in (UNSTAGED_ID, STAGED_ID):
+            return  # a commit diff is immutable; nothing to poll
+        self.run_worker(
+            self._do_refresh_worktree_diff(), group="git-diff-poll", exclusive=True
+        )
+
+    async def _do_refresh_worktree_diff(self) -> None:
+        if self._current_id not in (UNSTAGED_ID, STAGED_ID):
+            return
+        staged = self._current_id == STAGED_ID
+        fetch = git.diff_staged if staged else git.diff_unstaged
+        try:
+            diff = await fetch(self._repo)
+        except git.GitError:
+            return  # transient git error: keep the current diff shown
+        if diff == self._last_worktree_diff:
+            return  # unchanged: skip the re-render to avoid flicker
+        self._render_worktree(diff, staged=staged)
+
     # --------------------------------------------------------------- diff loaders
     async def _show_worktree(self, *, staged: bool) -> None:
         self._current_id = STAGED_ID if staged else UNSTAGED_ID
-        title = "Staged diff" if staged else "Unstaged diff"
-        self.query_one("#diff-title", Static).update(title)
         fetch = git.diff_staged if staged else git.diff_unstaged
         try:
             diff = await fetch(self._repo)
         except git.GitError as exc:
+            self.query_one("#diff-title", Static).update(
+                "Staged diff" if staged else "Unstaged diff"
+            )
             self._set_diff(Text(f"git error: {exc}", style="red"))
             self._emit_changed("")
             return
+        self._render_worktree(diff, staged=staged)
+
+    def _render_worktree(self, diff: str, *, staged: bool) -> None:
+        """Render a freshly fetched working-tree *diff* and broadcast its files."""
+        self._last_worktree_diff = diff
+        self.query_one("#diff-title", Static).update(
+            "Staged diff" if staged else "Unstaged diff"
+        )
         if diff.strip():
             self._set_diff(_colorize_diff(diff))
         else:

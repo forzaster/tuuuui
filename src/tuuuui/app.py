@@ -31,6 +31,9 @@ from .widgets.confirm import ConfirmScreen
 from .widgets.filer import Filer, FilerPanel
 from .widgets.git_view import GitView
 
+# How often to re-stat the open file for external edits (auto-reload).
+OPEN_FILE_POLL_SECONDS = 2.0
+
 
 class TuuuuiApp(App):
     """A 3-pane terminal IDE."""
@@ -55,11 +58,13 @@ class TuuuuiApp(App):
         *,
         workspace_cmd: str | None = None,
         tmux_mode: bool = False,
+        watch: bool = False,
     ) -> None:
         super().__init__()
         self.root = Path(root or Path.cwd()).resolve()
         self.workspace_cmd = workspace_cmd or tmux.DEFAULT_WORKSPACE_CMD
         self.tmux_mode = tmux_mode
+        self.watch = watch
         self.buffers = BufferManager()
         self._cx_pending = False
         self._cx_timer = None
@@ -70,7 +75,7 @@ class TuuuuiApp(App):
         # in-app widget (see action_spawn_workspace / --tmux).
         yield Header()
         yield FilerPanel(self.root, id="filer")
-        yield Center(self.root, id="center")
+        yield Center(self.root, watch=self.watch, id="center")
         yield Static("", id="prefix-hint")
         yield Footer()
 
@@ -78,6 +83,26 @@ class TuuuuiApp(App):
         self.query_one(Filer).focus()
         if self.tmux_mode:
             self.action_spawn_workspace()
+        if self.watch:
+            # Poll the open file for external edits; the git view polls its own
+            # working-tree diff (which also repaints the filer markers).
+            self.set_interval(OPEN_FILE_POLL_SECONDS, self._poll_open_file)
+
+    def _poll_open_file(self) -> None:
+        """Reload the open file if it changed on disk, preserving unsaved edits."""
+        if not self.center.showing_file:
+            return
+        fv = self.center.file_view
+        if fv.path is None or not fv.disk_changed():
+            return
+        if fv.is_modified:
+            self.notify(
+                f"{fv.path.name} changed on disk; kept your unsaved edits.",
+                severity="warning",
+            )
+            fv.mark_disk_seen()  # don't re-notify every tick for the same change
+            return
+        fv.reload()
 
     def on_git_view_files_changed(self, event: GitView.FilesChanged) -> None:
         """Mark the changed files (from the shown diff) in the filer."""

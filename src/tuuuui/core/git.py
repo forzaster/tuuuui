@@ -91,6 +91,33 @@ async def log(cwd: Path, max_count: int = 500) -> list[Commit]:
     return commits
 
 
+async def rev(cwd: Path, ref: str) -> str | None:
+    """Resolve *ref* to a full commit sha, or None if it does not exist."""
+    try:
+        out = await _run_git(cwd, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+    except GitError:
+        return None
+    sha = out.strip()
+    return sha or None
+
+
+async def base_ref(cwd: Path) -> str | None:
+    """Name of the upstream base branch (e.g. ``origin/develop``), or None.
+
+    Reads the remote's default branch via ``origin/HEAD``; returns None when no
+    remote default is configured.
+    """
+    try:
+        out = await _run_git(cwd, "rev-parse", "--abbrev-ref", "origin/HEAD")
+    except GitError:
+        return None
+    name = out.strip()
+    # Git prints the literal "origin/HEAD" when the symbolic ref is unset.
+    if not name or name.endswith("/HEAD"):
+        return None
+    return name
+
+
 async def diff_unstaged(cwd: Path) -> str:
     """Working-tree diff (unstaged changes). May be empty."""
     return await _run_git(cwd, "diff")
