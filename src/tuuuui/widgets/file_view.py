@@ -124,6 +124,21 @@ class FileView(Container):
         self._clean_text = self.editor.text
         self.query_one(ContentSwitcher).current = "editor"
 
+    def reload(self) -> None:
+        """Re-read the open file from disk, keeping the cursor where possible.
+
+        Refuses when the buffer has unsaved edits so an external change never
+        silently discards the user's work (callers should check first).
+        """
+        if self._path is None or self.is_modified:
+            return
+        cursor = self.editor.cursor_location
+        self.open_path(self._path)
+        try:
+            self.editor.move_cursor(cursor)
+        except Exception:
+            pass
+
     @property
     def read_only(self) -> bool:
         return self.editor.read_only

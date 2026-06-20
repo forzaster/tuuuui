@@ -23,7 +23,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer, Header, Static
 
-from .core import tmux
+from .core import tmux, watcher
 from .core.buffers import BufferManager
 from .widgets.buffer_list import BufferList
 from .widgets.center import Center
@@ -55,11 +55,13 @@ class TuuuuiApp(App):
         *,
         workspace_cmd: str | None = None,
         tmux_mode: bool = False,
+        watch: bool = False,
     ) -> None:
         super().__init__()
         self.root = Path(root or Path.cwd()).resolve()
         self.workspace_cmd = workspace_cmd or tmux.DEFAULT_WORKSPACE_CMD
         self.tmux_mode = tmux_mode
+        self.watch = watch
         self.buffers = BufferManager()
         self._cx_pending = False
         self._cx_timer = None
@@ -78,6 +80,35 @@ class TuuuuiApp(App):
         self.query_one(Filer).focus()
         if self.tmux_mode:
             self.action_spawn_workspace()
+        if self.watch:
+            self.run_worker(self._watch_filesystem(), name="fs-watch")
+
+    async def _watch_filesystem(self) -> None:
+        """Background task: refresh on external file changes under the root."""
+        try:
+            async for changed in watcher.awatch_paths(self.root):
+                self._handle_fs_changes(changed)
+        except Exception:  # never let the watcher take down the app
+            pass
+
+    def _handle_fs_changes(self, changed: set[Path]) -> None:
+        """React to an external batch of file changes (paths are resolved)."""
+        # Re-fetch the currently shown diff (same as C-r). This re-emits
+        # GitView.FilesChanged, which repaints the filer's changed-file markers.
+        self.center.git_view.action_reload_diff()
+        # Reload the open file if it changed on disk — but never discard the
+        # user's unsaved edits.
+        fv = self.center.file_view
+        path = fv.path
+        if path is None or path.resolve() not in changed:
+            return
+        if fv.is_modified:
+            self.notify(
+                f"{path.name} changed on disk; kept your unsaved edits.",
+                severity="warning",
+            )
+            return
+        fv.reload()
 
     def on_git_view_files_changed(self, event: GitView.FilesChanged) -> None:
         """Mark the changed files (from the shown diff) in the filer."""

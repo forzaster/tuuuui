@@ -80,6 +80,14 @@ role.
 - The files in the shown diff also drive the filer's markers and the "Changed
   only" filter (works for Unstaged, Staged, and any commit).
 
+### Real-time file watching
+- The project root is watched, so external edits (e.g. Claude Code writing
+  files) **auto-refresh** the git diff and the filer's changed-file markers —
+  no manual `C-r` needed.
+- If the file you have open changes on disk, it reloads automatically; when you
+  have **unsaved edits** it is left untouched and you get a notice instead.
+- Launch with `--no-watch` to disable this and refresh manually.
+
 ### Center mode switching (Tab)
 - `Tab` cycles the center pane: **git view → editor → shell** (the editor is
   skipped when no file is open). It works even from the editor, so the same key
